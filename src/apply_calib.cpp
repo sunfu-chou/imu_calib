@@ -48,7 +48,11 @@ ApplyCalib::ApplyCalib() :
   gyro_sample_count_(0),
   gyro_bias_x_(0.0),
   gyro_bias_y_(0.0),
-  gyro_bias_z_(0.0)
+  gyro_bias_z_(0.0),
+  acc_sample_count_(0),
+  acc_bias_x_(0.0),
+  acc_bias_y_(0.0),
+  acc_bias_z_(0.0)
 {
   ros::NodeHandle nh;
   ros::NodeHandle nh_private("~");
@@ -64,12 +68,18 @@ ApplyCalib::ApplyCalib() :
 
   nh_private.param<bool>("calibrate_gyros", calibrate_gyros_, true);
   nh_private.param<int>("gyro_calib_samples", gyro_calib_samples_, 100);
+  nh_private.param<bool>("calibrate_acc", calibrate_acc_, true);
+  nh_private.param<int>("acc_calib_samples", acc_calib_samples_, 100);
+
+  nh_private.param<bool>("calibrate_mag", calibrate_mag_, true);
 
   int queue_size;
   nh_private.param<int>("queue_size", queue_size, 5);
 
   raw_sub_ = nh.subscribe("raw", queue_size, &ApplyCalib::rawImuCallback, this);
   corrected_pub_ = nh.advertise<sensor_msgs::Imu>("corrected", queue_size);
+  calibrate_srv_ = nh.advertiseService("now_calibrate", &ApplyCalib::calibrationCallback, this);
+  // mag_calib_ = nh.advertiseClient("/mag_calib/start_calib", &ApplyCalib::magStartCalibrationCallback, this);
 }
 
 void ApplyCalib::rawImuCallback(sensor_msgs::Imu::ConstPtr raw)
@@ -98,11 +108,48 @@ void ApplyCalib::rawImuCallback(sensor_msgs::Imu::ConstPtr raw)
   calib_.applyCalib(raw->linear_acceleration.x, raw->linear_acceleration.y, raw->linear_acceleration.z,
                     &corrected.linear_acceleration.x, &corrected.linear_acceleration.y, &corrected.linear_acceleration.z);
 
+  if (calibrate_acc_)
+  {
+    ROS_INFO_ONCE("Calibrating acc; do not move the IMU");
+
+    // recursively compute mean acceleration measurements
+    acc_sample_count_++;
+    acc_bias_x_ = ((acc_sample_count_ - 1) * acc_bias_x_ + raw->linear_acceleration.x) / acc_sample_count_;
+    acc_bias_y_ = ((acc_sample_count_ - 1) * acc_bias_y_ + raw->linear_acceleration.y) / acc_sample_count_;
+    acc_bias_z_ = ((acc_sample_count_ - 1) * acc_bias_z_ + raw->linear_acceleration.z) / acc_sample_count_;
+
+    if (acc_sample_count_ >= acc_calib_samples_)
+    {
+      ROS_INFO("Acceleration calibration complete! (bias = [%.3f, %.3f])", acc_bias_x_, acc_bias_y_);
+      calibrate_acc_ = false;
+    }
+
+    return;
+  }  
+
   corrected.angular_velocity.x -= gyro_bias_x_;
   corrected.angular_velocity.y -= gyro_bias_y_;
   corrected.angular_velocity.z -= gyro_bias_z_;
 
+  corrected.linear_acceleration.x -= acc_bias_x_;
+  corrected.linear_acceleration.y -= acc_bias_y_;
+  corrected.linear_acceleration.z -= acc_bias_z_;
+
   corrected_pub_.publish(corrected);
+
+  if (calibrate_mag_)
+  {
+    std_srvs::Empty empt;
+    ros::service::call("/mag_calib/start_calib", empt);
+    calibrate_mag_ = false;
+  }
+}
+
+bool ApplyCalib::calibrationCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+{
+    calibrate_gyros_ = true;
+    calibrate_acc_ = true;
+    return true;
 }
 
 } // namespace accel_calib

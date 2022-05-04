@@ -41,6 +41,7 @@
 
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
+#include <std_srvs/Empty.h>
 
 #include <imu_calib/accel_calib.h>
 
@@ -58,15 +59,27 @@ private:
   ros::Subscriber raw_sub_;
   ros::Publisher corrected_pub_;
 
+  ros::ServiceServer calibrate_srv_;
+
   void rawImuCallback(sensor_msgs::Imu::ConstPtr raw);
+  bool calibrationCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
 
   bool calibrate_gyros_;
   int gyro_calib_samples_;
   int gyro_sample_count_;
 
+  bool calibrate_acc_;
+  int acc_calib_samples_;
+  int acc_sample_count_;
+  
+  bool calibrate_mag_;
+
   double gyro_bias_x_;
   double gyro_bias_y_;
   double gyro_bias_z_;
+  double acc_bias_x_;
+  double acc_bias_y_;
+  double acc_bias_z_;
 };
 
 } // namespace accel_calib
